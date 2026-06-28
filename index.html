@@ -1,0 +1,872 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>The Shopping List Dispatcher</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Outfit:wght@400;600;700;800&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: #0b1329; /* Deep warehouse navy */
+            color: #f8fafc;
+            touch-action: manipulation;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        .font-display {
+            font-family: 'Fredoka', sans-serif;
+        }
+
+        .font-terminal {
+            font-family: 'Share Tech Mono', monospace;
+        }
+
+        /* --- Clipboard Styling --- */
+        .clipboard-container {
+            background-color: #fdfbf7;
+            color: #1e293b;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4), inset 0 0 20px rgba(0,0,0,0.05);
+            border: 2px solid #cbd5e1;
+            position: relative;
+        }
+
+        /* Metal clip decoration */
+        .clipboard-clip {
+            position: absolute;
+            top: -12px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 100px;
+            height: 24px;
+            background: linear-gradient(to bottom, #94a3b8, #64748b);
+            border-radius: 4px;
+            border: 2px solid #475569;
+            z-index: 10;
+        }
+
+        /* --- Shipping Box / Packing Area --- */
+        .box-container {
+            width: 120px;
+            height: 120px;
+            position: relative;
+            transform-style: preserve-3d;
+            transition: transform 0.6s cubic-bezier(0.25, 1, 0.5, 1);
+        }
+
+        .box-flap-left {
+            transform-origin: bottom left;
+            transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        .box-flap-right {
+            transform-origin: bottom right;
+            transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        /* Closed/Sealed Box States */
+        .box-sealed .box-flap-left { transform: rotate(55deg); }
+        .box-sealed .box-flap-right { transform: rotate(-55deg); }
+
+        .tape-seal {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 10px;
+            height: 80px;
+            background-color: #b45309; /* brown packing tape */
+            border-radius: 2px;
+            opacity: 0;
+            transition: opacity 0.3s;
+            z-index: 30;
+        }
+        .box-sealed .tape-seal {
+            opacity: 0.85;
+            transition-delay: 0.3s;
+        }
+
+        /* --- Form Inputs & Tables --- */
+        .order-input {
+            background-color: #1e293b;
+            border: 2px solid #334155;
+            color: #f8fafc;
+            transition: all 0.2s;
+        }
+
+        .order-input:focus {
+            border-color: #38bdf8; /* sky-400 */
+            box-shadow: 0 0 10px rgba(56, 189, 248, 0.25);
+            background-color: #0f172a;
+        }
+
+        .row-correct {
+            background-color: rgba(16, 185, 129, 0.1) !important;
+            border-color: #10b981 !important;
+        }
+
+        .input-correct {
+            background-color: #064e3b !important;
+            border-color: #10b981 !important;
+            color: #34d399 !important;
+            pointer-events: none;
+        }
+
+        /* --- Animations --- */
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            20% { transform: translateX(-8px); }
+            40% { transform: translateX(8px); }
+            60% { transform: translateX(-8px); }
+            80% { transform: translateX(8px); }
+        }
+        .shake-error {
+            animation: shake 0.4s ease-in-out;
+            border-color: #ef4444 !important;
+            background-color: #1e1124 !important;
+        }
+
+        /* Flying element transition */
+        .flying-item {
+            position: fixed;
+            z-index: 100;
+            pointer-events: none;
+            transition: all 0.6s cubic-bezier(0.25, 1, 0.5, 1);
+            margin: 0 !important;
+        }
+
+        /* Sparkle Starburst on Packing */
+        .spark {
+            position: absolute;
+            width: 6px;
+            height: 6px;
+            background-color: #10b981;
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 100;
+            opacity: 0;
+        }
+        @keyframes burst {
+            0% { transform: translate(0, 0) scale(1); opacity: 1; }
+            100% { transform: translate(var(--tx), var(--ty)) scale(0); opacity: 0; }
+        }
+
+        /* Word chips helper list */
+        .word-chip {
+            background-color: #1e293b;
+            border: 1px solid #334155;
+            color: #cbd5e1;
+            transition: all 0.1s;
+        }
+        .word-chip:active {
+            transform: scale(0.95);
+            background-color: #334155;
+        }
+
+    </style>
+</head>
+<body class="p-0 sm:p-4 flex items-center justify-center">
+
+    <!-- Mobile Device Container -->
+    <div class="w-full h-full sm:h-[95vh] sm:max-w-md bg-slate-950 sm:rounded-[2.5rem] sm:border-[8px] sm:border-slate-800 shadow-2xl flex flex-col overflow-hidden relative">
+        
+        <!-- Header -->
+        <header class="bg-slate-900 border-b border-slate-800 px-5 py-4 flex justify-between items-center shrink-0 z-30">
+            <div class="flex items-center gap-2.5 text-sky-400">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>
+                <h1 class="font-display font-bold text-sm tracking-wider uppercase">Fulfillment Desk</h1>
+            </div>
+            <div class="bg-slate-800 border border-slate-700 text-sky-300 px-3 py-1 rounded-full text-xs font-bold font-terminal" id="progress-tracker">
+                ORDER 1/2
+            </div>
+        </header>
+
+        <!-- Upper Half: Shipping Manifest Clipboard (38%) -->
+        <section class="h-[38%] bg-slate-900/60 p-4 pb-2 flex flex-col justify-center items-center shrink-0 z-10 border-b border-slate-950 relative">
+            <div class="clipboard-container rounded-2xl w-full max-w-[320px] p-4 flex flex-col h-[85%] justify-center relative">
+                <div class="clipboard-clip"></div>
+                
+                <span class="text-[9px] font-terminal text-slate-400 uppercase tracking-widest block mb-1 text-center font-bold">Fulfillment Manifest</span>
+                
+                <!-- Scrollable Manifest Narrative -->
+                <div class="overflow-y-auto max-h-[85%] pr-1">
+                    <p id="manifest-narrative" class="text-xs sm:text-sm font-medium leading-relaxed text-slate-700 italic">
+                        Loading manifest details...
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Lower Half: Interactive Table & Packing Carton -->
+        <main class="flex-1 bg-slate-950 p-4 flex flex-col justify-between relative z-20 pb-safe">
+            
+            <p id="instruction-hint" class="text-center text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 shrink-0">
+                Complete the shipping list rows
+            </p>
+
+            <!-- Table & Carton Split View -->
+            <div class="flex-1 flex gap-4 overflow-hidden mb-2">
+                
+                <!-- Left: Interactive Table -->
+                <div class="flex-1 overflow-y-auto pr-1">
+                    <table class="w-full text-left text-xs">
+                        <thead>
+                            <tr class="border-b border-slate-800 text-[10px] text-slate-400 font-terminal uppercase">
+                                <th class="pb-2 w-[40%]">Name</th>
+                                <th class="pb-2 w-[60%]">Required Clothing</th>
+                            </tr>
+                        </thead>
+                        <tbody id="ledger-rows-container">
+                            <!-- Rows injected dynamically by JS -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Right: Packing Carton Area -->
+                <div class="w-[30%] shrink-0 flex flex-col justify-end items-center pb-4 relative">
+                    
+                    <div id="box-wrapper" class="box-container flex flex-col justify-end">
+                        <!-- Top Flaps -->
+                        <div class="absolute top-[20px] left-[1px] w-[50%] h-[20px] bg-amber-600 border border-amber-700 box-flap-left z-20 -rotate-[30deg]"></div>
+                        <div class="absolute top-[20px] right-[1px] w-[50%] h-[20px] bg-amber-600 border border-amber-700 box-flap-right z-20 rotate-[30deg]"></div>
+
+                        <!-- Inner Cavity -->
+                        <div class="absolute top-[20px] inset-x-[2px] bottom-0 bg-amber-950 rounded-b-xl z-10 flex items-center justify-center overflow-hidden">
+                            <div class="absolute inset-0 bg-black/45 z-10"></div>
+                            <span class="text-xl opacity-30 z-20">📦</span>
+                        </div>
+
+                        <!-- Front Face of Box -->
+                        <div class="absolute bottom-0 w-full h-[80px] bg-amber-700 border-x-2 border-b-2 border-amber-800 rounded-b-xl z-25 flex flex-col items-center justify-center shadow-md">
+                            <span class="text-[7px] font-terminal text-amber-900/80 leading-none text-center font-black">FRAGILE</span>
+                        </div>
+
+                        <!-- Sealing tape -->
+                        <div class="tape-seal"></div>
+                    </div>
+
+                </div>
+
+            </div>
+
+            <!-- Clickable Helper Word Chips for Low Beginners -->
+            <div class="mt-1 shrink-0">
+                <span class="text-[9px] font-terminal text-slate-500 uppercase tracking-widest text-center block mb-1.5 font-bold">Helper word chips (tap to insert)</span>
+                <div id="word-chips-container" class="flex flex-wrap gap-1.5 justify-center">
+                    <!-- Word buttons injected here dynamically -->
+                </div>
+            </div>
+
+        </main>
+
+        <!-- Completion Modal -->
+        <div id="end-overlay" class="fixed inset-0 bg-slate-950/95 z-50 hidden flex-col items-center justify-center p-6 text-center backdrop-blur-sm">
+            <div class="text-center max-w-sm w-full">
+                <div class="text-7xl mb-6 animate-bounce">📦✨</div>
+                <h2 class="font-display text-3xl font-bold text-sky-400 mb-2 tracking-widest uppercase">Grid Fully Loaded</h2>
+                <p class="text-slate-400 mb-8 text-sm font-medium leading-relaxed">
+                    Outstanding job! You successfully compiled all clothing manifests, validated lists, and packed every single shipment.
+                </p>
+                <button onclick="location.reload()" class="w-full font-display px-8 py-4 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xl rounded-2xl shadow-[0_0_20px_rgba(14,165,233,0.4)] transition-all active:scale-95 tracking-widest">
+                    Start Next Shift
+                </button>
+            </div>
+        </div>
+
+        <!-- Start Overlay Screen -->
+        <div id="start-overlay" class="fixed inset-0 bg-slate-950/95 z-50 flex flex-col items-center justify-center p-6 backdrop-blur-sm text-center">
+            <div class="text-6xl mb-6">📦📋</div>
+            <h1 class="font-display text-3xl font-bold text-sky-400 mb-4 tracking-widest uppercase">The Shopping List Dispatcher</h1>
+            <p class="text-slate-400 text-sm font-medium leading-relaxed mb-8 max-w-xs">
+                Welcome to the fulfillment desk. Review each family manifest, fill out the ledger rows correctly, and pack their items into the shipping carton!
+            </p>
+            <button id="btn-start" class="w-full max-w-[250px] bg-sky-600 hover:bg-sky-500 text-white font-display font-bold py-4 rounded-2xl shadow-[0_0_20px_rgba(14,165,233,0.4)] transition-all active:scale-95 text-lg uppercase tracking-widest">
+                Start Packing
+            </button>
+        </div>
+
+    </div>
+
+    <!-- Particles Layer Container -->
+    <div id="particles-layer" class="pointer-events-none absolute inset-0 z-50"></div>
+
+    <!-- --- System Logic & Scripts --- -->
+    <script>
+        // High fidelity custom SVGs matching clothing assets
+        const svgDress = `
+            <svg viewBox="0 0 100 100" class="w-16 h-16">
+                <polygon points="40,24 50,32 60,24 50,20" fill="none" stroke="#f472b6" stroke-width="2" />
+                <path d="M 34,24 L 66,24 L 66,45 L 34,45 Z" fill="#ec4899" stroke="#be123c" stroke-width="2" />
+                <path d="M 34,45 L 66,45 L 82,85 L 18,85 Z" fill="#ec4899" stroke="#be123c" stroke-width="2" stroke-linejoin="round" />
+            </svg>
+        `;
+
+        const svgShoes = `
+            <svg viewBox="0 0 100 100" class="w-16 h-16">
+                <path d="M15,60 Q25,45 45,50 L45,70 Q25,70 15,60 Z" fill="#78350f" stroke="#451a03" stroke-width="2" />
+                <path d="M48,60 Q58,45 78,50 L80,70 Q60,70 48,60 Z" fill="#78350f" stroke="#451a03" stroke-width="2" />
+            </svg>
+        `;
+
+        const svgBlouse = `
+            <svg viewBox="0 0 100 100" class="w-16 h-16">
+                <polygon points="40,24 50,32 60,24 50,20" fill="none" stroke="#818cf8" stroke-width="2" />
+                <path d="M 32,24 L 66,24 L 66,75 L 32,75 Z" fill="#a5b4fc" stroke="#4338ca" stroke-width="2" />
+                <circle cx="50" cy="40" r="2.5" fill="#4338ca" /><circle cx="50" cy="55" r="2.5" fill="#4338ca" />
+            </svg>
+        `;
+
+        const svgSkirt = `
+            <svg viewBox="0 0 100 100" class="w-16 h-16">
+                <rect x="35" y="25" width="30" height="6" rx="2" fill="#be123c" />
+                <path d="M 36,31 L 64,31 L 78,85 L 22,85 Z" fill="#fb7185" stroke="#be123c" stroke-width="2" />
+                <line x1="47" y1="31" x2="41" y2="85" stroke="#be123c" stroke-width="1.5" />
+                <line x1="53" y1="31" x2="59" y2="85" stroke="#be123c" stroke-width="1.5" />
+            </svg>
+        `;
+
+        const svgTshirt = `
+            <svg viewBox="0 0 100 100" class="w-16 h-16">
+                <path d="M 32,25 L 68,25 L 68,75 L 32,75 Z" fill="#10b981" stroke="#047857" stroke-width="2" />
+                <path d="M 32,25 L 15,38 L 22,44 L 32,34 Z" fill="#10b981" stroke="#047857" stroke-width="2" />
+                <path d="M 68,25 L 85,38 L 78,44 L 68,34 Z" fill="#10b981" stroke="#047857" stroke-width="2" />
+            </svg>
+        `;
+
+        const svgSweater = `
+            <svg viewBox="0 0 100 100" class="w-16 h-16">
+                <path d="M 32,32 L 50,25 L 68,32 L 68,75 L 32,75 Z" fill="#06b6d4" stroke="#0891b2" stroke-width="2" />
+                <path d="M 32,32 L 18,60 L 24,63 L 32,45 Z" fill="#06b6d4" stroke="#0891b2" stroke-width="2" />
+                <path d="M 68,32 L 82,60 L 76,63 L 68,45 Z" fill="#06b6d4" stroke="#0891b2" stroke-width="2" />
+            </svg>
+        `;
+
+        const svgRaincoat = `
+            <svg viewBox="0 0 100 100" class="w-16 h-16">
+                <path d="M 50,15 C 38,15 35,25 35,32 C 38,32 42,30 50,32 C 58,32 62,30 65,32 C 65,25 62,15 50,15 Z" fill="#eab308" stroke="#ca8a04" stroke-width="2" />
+                <path d="M 35,32 L 65,32 L 72,85 L 28,85 Z" fill="#facc15" stroke="#ca8a04" stroke-width="2" />
+            </svg>
+        `;
+
+        const svgPants = `
+            <svg viewBox="0 0 100 100" class="w-16 h-16">
+                <path d="M 32,15 L 68,15 L 72,25 L 63,85 L 51,85 L 50,38 L 49,85 L 37,85 L 28,25 Z" fill="#3b82f6" stroke="#1d4ed8" stroke-width="2" />
+            </svg>
+        `;
+
+        const svgShirt = `
+            <svg viewBox="0 0 100 100" class="w-16 h-16">
+                <path d="M 30,25 L 70,25 L 70,75 L 30,75 Z" fill="#f8fafc" stroke="#475569" stroke-width="2" />
+                <polygon points="38,25 50,35 62,25 50,20" fill="none" stroke="#475569" stroke-width="1.5" />
+            </svg>
+        `;
+
+        // Database map for item graphics
+        const garmentGraphics = {
+            "dress": svgDress,
+            "shoes": svgShoes,
+            "blouse": svgBlouse,
+            "skirt": svgSkirt,
+            "T-shirt": svgTshirt,
+            "sweater": svgSweater,
+            "raincoat": svgRaincoat,
+            "pants": svgPants,
+            "shirt": svgShirt
+        };
+
+        // Datasets sourced directly from Textbook (a70142.jpg / a703ec.jpg)
+        const ordersData = [
+            {
+                id: "sunmi",
+                narrative: "Sun Mi and her children are shopping today. They need clothes for school. Sun Mi needs a dress and shoes. Her son Roger needs a T-shirt and a sweater. Her daughter Emily needs a blouse and a skirt.",
+                progressLabel: "ORDER 1/2",
+                chips: ["dress", "shoes", "blouse", "skirt", "T-shirt", "sweater"],
+                rows: [
+                    {
+                        name: "Sun Mi",
+                        acceptedPatterns: [
+                            /^(a\s+)?dress,?\s*(and\s+)?(shoes)?$/i,
+                            /^shoes,?\s*(and\s+)?(a\s+)?dress$/i
+                        ],
+                        exactAnswer: "a dress, shoes",
+                        graphic: "dress"
+                    },
+                    {
+                        name: "Emily",
+                        acceptedPatterns: [
+                            /^(a\s+)?blouse,?\s*(and\s+)?(a\s+)?skirt$/i,
+                            /^(a\s+)?skirt,?\s*(and\s+)?(a\s+)?blouse$/i
+                        ],
+                        exactAnswer: "a blouse, a skirt",
+                        graphic: "blouse"
+                    },
+                    {
+                        name: "Roger",
+                        acceptedPatterns: [
+                            /^(a\s+)?T-shirt,?\s*(and\s+)?(a\s+)?sweater$/i,
+                            /^(a\s+)?sweater,?\s*(and\s+)?(a\s+)?T-shirt$/i,
+                            /^(a\s+)?t\s+shirt,?\s*(and\s+)?(a\s+)?sweater$/i
+                        ],
+                        exactAnswer: "a T-shirt, a sweater",
+                        graphic: "sweater"
+                    }
+                ]
+            },
+            {
+                id: "francesca",
+                narrative: "Francesca is shopping today with her family. They need new clothes. Her mother Carmela needs a dress. Her husband Mario needs a shirt. Her son Jerome needs pants. Her daughter Lisa needs a raincoat. Francesca needs new shoes.",
+                progressLabel: "ORDER 2/2",
+                chips: ["shoes", "raincoat", "pants", "dress", "shirt"],
+                rows: [
+                    {
+                        name: "Francesca",
+                        acceptedPatterns: [/^(new\s+)?shoes$/i],
+                        exactAnswer: "shoes",
+                        graphic: "shoes"
+                    },
+                    {
+                        name: "Lisa",
+                        acceptedPatterns: [/^(a\s+)?raincoat$/i],
+                        exactAnswer: "raincoat",
+                        graphic: "raincoat"
+                    },
+                    {
+                        name: "Jerome",
+                        acceptedPatterns: [/^pants$/i],
+                        exactAnswer: "pants",
+                        graphic: "pants"
+                    },
+                    {
+                        name: "Carmela",
+                        acceptedPatterns: [/^(a\s+)?dress$/i],
+                        exactAnswer: "a dress",
+                        graphic: "dress"
+                    },
+                    {
+                        name: "Mario",
+                        acceptedPatterns: [/^(a\s+)?shirt$/i],
+                        exactAnswer: "shirt",
+                        graphic: "shirt"
+                    }
+                ]
+            }
+        ];
+
+        let activeOrderIndex = 0;
+        let activeRowIndex = 0;
+        let isAnimating = false;
+        let attemptsCount = 0;
+
+        // DOM Elements
+        const manifestNarrative = document.getElementById('manifest-narrative');
+        const ledgerRowsContainer = document.getElementById('ledger-rows-container');
+        const boxWrapper = document.getElementById('box-wrapper');
+        const wordChipsContainer = document.getElementById('word-chips-container');
+        const progressTracker = document.getElementById('progress-tracker');
+        const instructionHint = document.getElementById('instruction-hint');
+        const particlesLayer = document.getElementById('particles-layer');
+        const endOverlay = document.getElementById('end-overlay');
+        const startOverlay = document.getElementById('start-overlay');
+        const btnStart = document.getElementById('btn-start');
+
+        // Web Audio Context Setup
+        let audioCtx = null;
+
+        function initAudio() {
+            if (!audioCtx) {
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                audioCtx = new AudioContext();
+            }
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+        }
+
+        // --- Sound Effects Synthesizers ---
+        function playTypingSound() {
+            initAudio();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            
+            // Fast physical typewriter clack
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(600, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(1200, audioCtx.currentTime + 0.05);
+            
+            gain.gain.setValueAtTime(0, audioCtx.currentTime);
+            gain.gain.linearRampToValueAtTime(0.3, audioCtx.currentTime + 0.01);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.08);
+            
+            osc.start(audioCtx.currentTime);
+            osc.stop(audioCtx.currentTime + 0.08);
+        }
+
+        function playCorrectChime() {
+            initAudio();
+            const notes = [523.25, 659.25, 1046.50]; // C5, E5, C6
+            notes.forEach((freq, i) => {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.type = 'triangle';
+                osc.frequency.value = freq;
+                const startTime = audioCtx.currentTime + (i * 0.12);
+                gain.gain.setValueAtTime(0, startTime);
+                gain.gain.linearRampToValueAtTime(0.35, startTime + 0.05);
+                gain.gain.exponentialRampToValueAtTime(0.01, startTime + 0.4);
+                osc.start(startTime);
+                osc.stop(startTime + 0.4);
+            });
+        }
+
+        function playErrorSound() {
+            initAudio();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(150, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(80, audioCtx.currentTime + 0.25);
+            gain.gain.setValueAtTime(0, audioCtx.currentTime);
+            gain.gain.linearRampToValueAtTime(0.35, audioCtx.currentTime + 0.02);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.25);
+            osc.start(audioCtx.currentTime);
+            osc.stop(audioCtx.currentTime + 0.25);
+        }
+
+        function playTapeSound() {
+            initAudio();
+            const duration = 0.25;
+            const bufferSize = audioCtx.sampleRate * duration;
+            const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+            const data = buffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) {
+                data[i] = (Math.random() * 2 - 1) * Math.sin(i * 0.04);
+            }
+            const noise = audioCtx.createBufferSource();
+            noise.buffer = buffer;
+            const filter = audioCtx.createBiquadFilter();
+            filter.type = 'highpass';
+            filter.frequency.setValueAtTime(3000, audioCtx.currentTime);
+            const gain = audioCtx.createGain();
+            gain.gain.setValueAtTime(0, audioCtx.currentTime);
+            gain.gain.linearRampToValueAtTime(0.25, audioCtx.currentTime + 0.02);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+            noise.connect(filter);
+            filter.connect(gain);
+            gain.connect(audioCtx.destination);
+            noise.start();
+        }
+
+        // --- Core Loops ---
+
+        function initGame() {
+            btnStart.addEventListener('click', () => {
+                initAudio();
+                startOverlay.classList.add('hidden');
+                loadOrder(activeOrderIndex);
+            });
+        }
+
+        function loadOrder(orderIdx) {
+            if (orderIdx >= ordersData.length) {
+                showEndScreen();
+                return;
+            }
+
+            const data = ordersData[orderIdx];
+            activeRowIndex = 0;
+            isAnimating = false;
+            attemptsCount = 0;
+
+            // Header/HUD update
+            progressTracker.innerText = data.progressLabel;
+            manifestNarrative.innerText = data.narrative;
+            instructionHint.innerText = "Type or tap words to fill the rows";
+            instructionHint.classList.replace('text-red-400', 'text-slate-500');
+
+            // Reset Box states
+            boxWrapper.className = "box-container flex flex-col justify-end";
+            boxWrapper.style.transform = '';
+
+            // Generate Ledger Table Rows
+            ledgerRowsContainer.innerHTML = '';
+            data.rows.forEach((row, idx) => {
+                const tr = document.createElement('tr');
+                tr.className = 'border-b border-slate-900 transition-colors duration-300';
+                tr.id = `row-node-${idx}`;
+                
+                tr.innerHTML = `
+                    <td class="py-2.5 font-bold text-slate-300 font-terminal">${row.name}</td>
+                    <td class="py-2.5 relative">
+                        <input 
+                            type="text" 
+                            id="input-field-${idx}" 
+                            class="order-input w-full rounded-lg px-3 py-1.5 text-xs font-bold font-sans"
+                            placeholder="Type clothing..."
+                            disabled
+                        >
+                    </td>
+                `;
+
+                // Handle active state entry trigger on input keypress
+                const input = tr.querySelector('input');
+                input.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        validateRowInput(idx, input);
+                    }
+                });
+                
+                // Reset error highlights on edit
+                input.addEventListener('input', () => {
+                    input.classList.remove('shake-error');
+                    instructionHint.classList.replace('text-red-400', 'text-slate-500');
+                });
+
+                ledgerRowsContainer.appendChild(tr);
+            });
+
+            // Populate Helper Word Chips
+            wordChipsContainer.innerHTML = '';
+            data.chips.forEach(word => {
+                const btn = document.createElement('button');
+                btn.className = 'word-chip rounded-xl px-3 py-2 text-xs font-bold font-sans';
+                btn.innerText = word;
+                btn.onclick = () => handleChipTap(word);
+                wordChipsContainer.appendChild(btn);
+            });
+
+            // Activate first row
+            activateRow(0);
+        }
+
+        function activateRow(rowIdx) {
+            isAnimating = false;
+
+            const rows = document.querySelectorAll('#ledger-rows-container tr');
+            const inputs = document.querySelectorAll('.order-input');
+
+            // Set visual active states
+            rows.forEach((row, idx) => {
+                const input = inputs[idx];
+                if (idx === rowIdx) {
+                    row.classList.add('bg-slate-900/50');
+                    input.disabled = false;
+                    input.focus();
+                } else {
+                    row.classList.remove('bg-slate-900/50');
+                    input.disabled = true;
+                }
+            });
+        }
+
+        function handleChipTap(word) {
+            if (isAnimating) return;
+            initAudio();
+            playTypingSound();
+
+            const input = document.getElementById(`input-field-${activeRowIndex}`);
+            if (!input || input.disabled) return;
+
+            let currentVal = input.value.trim();
+            if (currentVal.length > 0) {
+                // Determine punctuation: if a word is already typed, append a comma separator
+                // If it ends with a comma, just space, otherwise add comma + space
+                if (currentVal.endsWith(',')) {
+                    currentVal += ' ';
+                } else {
+                    currentVal += ', ';
+                }
+            }
+            input.value = currentVal + word;
+            input.focus();
+        }
+
+        function validateRowInput(idx, inputEl) {
+            if (isAnimating) return;
+            initAudio();
+
+            const data = ordersData[activeOrderIndex];
+            const rowData = data.rows[idx];
+
+            let text = inputEl.value.trim().replace(/\s{2,}/g, ' '); // Clean duplicate spaces
+            if (!text) return;
+
+            // Standardize format: lowercase, remove periods
+            const cleanedText = text.toLowerCase().replace(/[.]/g, '').trim();
+
+            let isCorrect = rowData.acceptedPatterns.some(regex => regex.test(cleanedText));
+
+            if (isCorrect) {
+                handleRowSuccess(idx, inputEl, rowData);
+            } else {
+                handleRowError(inputEl, rowData);
+            }
+        }
+
+        function handleRowSuccess(idx, inputEl, rowData) {
+            isAnimating = true;
+            attemptsCount = 0;
+            playCorrectChime();
+
+            // Settle Row states
+            const tr = document.getElementById(`row-node-${idx}`);
+            tr.classList.remove('bg-slate-900/50');
+            tr.classList.add('row-correct');
+
+            inputEl.disabled = true;
+            inputEl.classList.add('input-correct');
+
+            // Trigger Cargo Drop flight animation
+            triggerFulfillmentFlight(inputEl, rowData.graphic);
+        }
+
+        function handleRowError(inputEl, rowData) {
+            attemptsCount++;
+            playErrorSound();
+
+            inputEl.classList.add('shake-error');
+            setTimeout(() => inputEl.classList.remove('shake-error'), 400);
+
+            // Progressive helper hint
+            instructionHint.classList.replace('text-slate-500', 'text-red-400');
+            if (attemptsCount >= 2) {
+                instructionHint.innerHTML = `Hint: Write <span class="font-bold text-white uppercase font-terminal">"${rowData.exactAnswer}"</span>`;
+            } else {
+                instructionHint.innerText = "Error! Mismatched manifest entries.";
+            }
+        }
+
+        function triggerFulfillmentFlight(inputEl, garmentName) {
+            // Find coordinates of input element and cardboard box
+            const inputRect = inputEl.getBoundingClientRect();
+            const boxRect = boxWrapper.getBoundingClientRect();
+
+            // Create Flying Duplicate element using the Custom SVG mapped
+            const clone = document.createElement('div');
+            clone.className = 'flying-item';
+            clone.style.left = `${inputRect.left}px`;
+            clone.style.top = `${inputRect.top}px`;
+            clone.style.width = `${inputRect.height}px`; // Start scaled tiny
+            clone.style.height = `${inputRect.height}px`;
+
+            clone.innerHTML = garmentGraphics[garmentName];
+            document.body.appendChild(clone);
+
+            // Force layout reflow
+            void clone.offsetWidth;
+
+            // Coordinate targets: Center of the cardboard box
+            const targetX = boxRect.left + (boxRect.width / 2) - 32; // half SVG width (64/2)
+            const targetY = boxRect.top + (boxRect.height / 2) - 32;
+
+            clone.style.transform = `translate(${targetX - inputRect.left}px, ${targetY - inputRect.top}px) scale(1) rotate(45deg)`;
+            clone.style.opacity = '0.5';
+
+            // Snap inside box
+            setTimeout(() => {
+                clone.remove();
+                playTypingSound(); // Thud sound
+                
+                createParticlesBurst(boxRect);
+
+                activeRowIndex++;
+                const data = ordersData[activeOrderIndex];
+
+                if (activeRowIndex < data.rows.length) {
+                    // Activate next row in sequence
+                    activateRow(activeRowIndex);
+                } else {
+                    // All rows finished! Package the Box
+                    handleOrderComplete();
+                }
+
+            }, 600); // Wait for flight transition
+        }
+
+        function handleOrderComplete() {
+            // 1. Lock Box flaps
+            boxWrapper.classList.add('box-sealed');
+            
+            setTimeout(() => {
+                playTapeSound();
+                createParticlesBurst(boxWrapper.getBoundingClientRect());
+
+                setTimeout(() => {
+                    playSuccessChime();
+
+                    // 2. Slide Box out to the right
+                    boxWrapper.style.transition = 'all 0.5s cubic-bezier(0.55, 0.085, 0.68, 0.53)';
+                    boxWrapper.style.transform = 'translateX(200vw)';
+
+                    setTimeout(() => {
+                        // Reset Box position off-screen left
+                        boxWrapper.style.transition = 'none';
+                        boxWrapper.style.transform = 'translateX(-200vw)';
+
+                        activeOrderIndex++;
+                        if (activeOrderIndex < ordersData.length) {
+                            loadOrder(activeOrderIndex);
+
+                            // Slide new open box back in
+                            setTimeout(() => {
+                                boxWrapper.style.transition = 'transform 0.5s cubic-bezier(0.25, 1, 0.5, 1)';
+                                boxWrapper.style.transform = 'translateX(0)';
+                            }, 50);
+
+                        } else {
+                            showEndScreen();
+                        }
+
+                    }, 500); // wait for exit slide
+
+                }, 1000); // observe tape seal
+
+            }, 400); // wait for flaps close
+        }
+
+        function createParticlesBurst(rect) {
+            const cx = rect.left + rect.width / 2;
+            const cy = rect.top + rect.height / 2;
+
+            for (let i = 0; i < 15; i++) {
+                const spark = document.createElement('div');
+                spark.className = 'spark';
+                spark.style.left = `${cx}px`;
+                spark.style.top = `${cy}px`;
+                
+                const angle = Math.random() * Math.PI * 2;
+                const distance = 40 + Math.random() * 80;
+                const tx = Math.cos(angle) * distance;
+                const ty = Math.sin(angle) * distance;
+                
+                spark.style.setProperty('--tx', `${tx}px`);
+                spark.style.setProperty('--ty', `${ty}px`);
+                
+                // Color theme: match emerald success
+                spark.style.backgroundColor = "#10b981";
+                spark.style.animation = `burst 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards`;
+                
+                particlesLayer.appendChild(spark);
+                setTimeout(() => spark.remove(), 600);
+            }
+        }
+
+        function showEndScreen() {
+            playSuccessChime();
+            endOverlay.classList.remove('hidden');
+            endOverlay.classList.add('flex');
+        }
+
+        // Boot
+        window.onload = initGame;
+
+    </script>
+</body>
+</html>
